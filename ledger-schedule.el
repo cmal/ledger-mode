@@ -1,4 +1,4 @@
-;;; ledger-schedule.el --- Helper code for use with the "ledger" command-line tool
+;;; ledger-schedule.el --- Helper code for use with the "ledger" command-line tool  -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2013 Craig Earls (enderw88 at gmail dot com)
 
@@ -32,7 +32,7 @@
 
 
 (require 'ledger-init)
-(require 'cl-macs)
+(require 'cl-lib)
 
 (declare-function ledger-mode "ledger-mode")
 ;;; Code:
@@ -67,21 +67,21 @@
                                        ("Th" 4)
                                        ("Fr" 5)
                                        ("Sa" 6)
-                                       ("Su" 7))
+                                       ("Su" 0))
   "List of weekday abbreviations.  There must be exactly seven
 entries each with a two character abbreviation for a day and the
 number of that day in the week. "
   :type '(alist :value-type (group integer))
   :group 'ledger-schedule)
 
-(defsubst between (val low high)
+(defsubst ledger-between (val low high)
   "Return TRUE if VAL > LOW and < HIGH."
   (and (>= val low) (<= val high)))
 
 (defun ledger-schedule-days-in-month (month year)
   "Return number of days in the MONTH, MONTH is from 1 to 12.
 If YEAR is nil, assume it is not a leap year"
-  (if (between month 1 12)
+  (if (ledger-between month 1 12)
       (if (and year (date-leap-year-p year) (= 2 month))
           29
         (nth (1- month) '(31 28 31 30 31 30 31 31 30 31 30 31)))
@@ -98,16 +98,16 @@ If YEAR is nil, assume it is not a leap year"
 For example, return true if date is the 3rd Thursday of the
 month.  Negative COUNT starts from the end of the month. (EQ
 COUNT 0) means EVERY day-of-week (eg. every Saturday)"
-  (if (and (between count -6 6) (between day-of-week 0 6))
+  (if (and (ledger-between count -6 6) (ledger-between day-of-week 0 6))
       (cond ((zerop count) ;; Return true if day-of-week matches
              `(eq (nth 6 (decode-time date)) ,day-of-week))
             ((> count 0) ;; Positive count
              (let ((decoded (cl-gensym)))
                `(let ((,decoded (decode-time date)))
                   (and (eq (nth 6 ,decoded) ,day-of-week)
-                       (between  (nth 3 ,decoded)
-                                 ,(* (1- count) 7)
-                                 ,(* count 7))))))
+                       (ledger-between  (nth 3 ,decoded)
+                                        ,(* (1- count) 7)
+                                        ,(* count 7))))))
             ((< count 0)
              (let ((days-in-month (cl-gensym))
                    (decoded (cl-gensym)))
@@ -116,9 +116,9 @@ COUNT 0) means EVERY day-of-week (eg. every Saturday)"
                                         (nth 4 ,decoded)
                                         (nth 5 ,decoded))))
                   (and (eq (nth 6 ,decoded) ,day-of-week)
-                       (between  (nth 3 ,decoded)
-                                 (+ ,days-in-month ,(* count 7))
-                                 (+ ,days-in-month ,(* (1+ count) 7)))))))
+                       (ledger-between  (nth 3 ,decoded)
+                                        (+ ,days-in-month ,(* count 7))
+                                        (+ ,days-in-month ,(* (1+ count) 7)))))))
             (t
              (error "COUNT out of range, COUNT=%S" count)))
     (error "Invalid argument to ledger-schedule-day-in-month-macro %S %S"
@@ -232,9 +232,9 @@ date descriptor."
    ((string= month-desc "*")
     t)  ;; always match
    ((string= month-desc "E")  ;; Even
-    `(evenp (nth 4 (decode-time date))))
+    `(cl-evenp (nth 4 (decode-time date))))
    ((string= month-desc "O")  ;; Odd
-    `(oddp (nth 4 (decode-time date))))
+    `(cl-oddp (nth 4 (decode-time date))))
    ((/= 0 (string-to-number month-desc)) ;; Starts with number
     `(memq (nth 4 (decode-time date)) ',(mapcar 'string-to-number (split-string month-desc ","))))
    (t
@@ -278,23 +278,21 @@ date descriptor."
   "Search CANDIDATE-ITEMS for xacts that occur within the period today - EARLY  to today + HORIZON."
   (let ((start-date (time-subtract (current-time) (days-to-time early)))
         test-date items)
-    (loop for day from 0 to (+ early horizon) by 1 do
-          (setq test-date (time-add start-date (days-to-time day)))
-          (dolist (candidate candidate-items items)
-            (if (funcall (car candidate) test-date)
-                (setq items (append items (list (list test-date (cadr candidate))))))))
+    (cl-loop for day from 0 to (+ early horizon) by 1 do
+             (setq test-date (time-add start-date (days-to-time day)))
+             (dolist (candidate candidate-items items)
+               (if (funcall (car candidate) test-date)
+                   (setq items (append items (list (list test-date (cadr candidate))))))))
     items))
 
-(defun ledger-schedule-create-auto-buffer (candidate-items early horizon ledger-buf)
+(defun ledger-schedule-create-auto-buffer (candidate-items early horizon)
   "Format CANDIDATE-ITEMS for display."
   (let ((candidates (ledger-schedule-list-upcoming-xacts candidate-items early horizon))
-        (schedule-buf (get-buffer-create ledger-schedule-buffer-name))
-        (date-format (or (cdr (assoc "date-format" ledger-environment-alist))
-                         ledger-default-date-format)))
+        (schedule-buf (get-buffer-create ledger-schedule-buffer-name)))
     (with-current-buffer schedule-buf
       (erase-buffer)
       (dolist (candidate candidates)
-        (insert (format-time-string date-format (car candidate) ) " " (cadr candidate) "\n"))
+        (insert (ledger-format-date (car candidate) ) " " (cadr candidate) "\n"))
       (ledger-mode))
     (length candidates)))
 
@@ -320,8 +318,7 @@ Use a prefix arg to change the default value"
         (ledger-schedule-create-auto-buffer
          (ledger-schedule-scan-transactions file)
          look-backward
-         look-forward
-         (current-buffer))
+         look-forward)
         (pop-to-buffer ledger-schedule-buffer-name))
     (error "Could not find ledger schedule file at %s" file)))
 

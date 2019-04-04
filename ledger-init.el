@@ -1,4 +1,4 @@
-;;; ledger-init.el --- Helper code for use with the "ledger" command-line tool
+;;; ledger-init.el --- Helper code for use with the "ledger" command-line tool  -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2003-2016 John Wiegley (johnw AT gnu DOT org)
 
@@ -28,13 +28,30 @@
 
 (defcustom ledger-init-file-name "~/.ledgerrc"
   "Location of the ledger initialization file.  nil if you don't have one."
+  :type 'file
   :group 'ledger-exec)
 
-(defvar ledger-environment-alist nil)
+(defvar ledger-environment-alist nil
+  "Variable to hold details about ledger-mode's environment.
 
-(defvar ledger-default-date-format "%Y/%m/%d")
+Adding the dotted pair (\"decimal-comma\" . t) will tell ledger
+to treat commas as decimal separator.")
 
-(defvar ledger-iso-date-format "%Y-%m-%d")
+(defvar ledger-default-date-format "%Y/%m/%d"
+  "The date format that ledger uses throughout.
+Set this to `ledger-iso-date-format' if you prefer ISO 8601 dates.")
+
+(defconst ledger-iso-date-format "%Y-%m-%d"
+  "The format for ISO 8601 dates.")
+
+(defun ledger-format-date (&optional date)
+  "Format DATE according to the current preferred date format.
+Returns the current date if DATE is nil or not supplied."
+  (format-time-string
+   (or (cdr (assoc "date-format" ledger-environment-alist))
+       ledger-default-date-format)
+   date))
+
 
 (defun ledger-init-parse-initialization (buffer)
   "Parse the .ledgerrc file in BUFFER."
@@ -67,10 +84,10 @@
       (when (and ledger-init-file-name
                  (file-exists-p ledger-init-file-name)
                  (file-readable-p ledger-init-file-name))
-        (find-file-noselect ledger-init-file-name)
-        (setq ledger-environment-alist
-              (ledger-init-parse-initialization init-base-name))
-        (kill-buffer init-base-name)))))
+        (let ((init-buffer (find-file-noselect ledger-init-file-name)))
+          (setq ledger-environment-alist
+                (ledger-init-parse-initialization init-buffer))
+          (kill-buffer init-buffer))))))
 
 (provide 'ledger-init)
 

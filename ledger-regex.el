@@ -1,4 +1,4 @@
-;;; ledger-regex.el --- Helper code for use with the "ledger" command-line tool
+;;; ledger-regex.el --- Helper code for use with the "ledger" command-line tool  -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2003-2016 John Wiegley (johnw AT gnu DOT org)
 
@@ -20,9 +20,7 @@
 ;; MA 02110-1301 USA.
 
 (require 'rx)
-
-(eval-when-compile
-  (require 'cl))
+(require 'cl-lib)
 
 (defconst ledger-amount-regex
   (concat "\\(  \\|\t\\| \t\\)[ \t]*-?"
@@ -73,17 +71,27 @@
 (defconst ledger-init-string-regex
   "^--.+?\\($\\|[ ]\\)")
 
-(defconst ledger-account-any-status-regex
-  "^[ \t]+\\([*!]\\s-+\\)?\\([[(]?.+?\\)\\(\t\\|\n\\| [ \t]\\)")
+(defconst ledger-account-directive-regex
+  "^account [ \t]*\\(?2:[^;]+?\\)\\(?3:[ \t]*\\)\\(;.*\\)?$")
 
-(defun ledger-account-any-status-with-seed-regex (seed)
-  (concat "^[ \t]+\\([*!]\\s-+\\)?\\([[(]?" seed ".+?\\)\\(\t\\|\n\\| [ \t]\\)"))
+(defconst ledger-account-any-status-no-trailing-spaces-regex
+  "^[ \t]+\\(?1:[*!]\\s-+\\)?[[(]?\\(?2:[^; ].+?\\)[])]?")
+
+(defconst ledger-account-any-status-regex
+  (format "%s%s"
+          ledger-account-any-status-no-trailing-spaces-regex
+          "\\(?3:\t\\| [ \t]\\|$\\)"))
+
+(defconst ledger-account-name-or-directive-regex
+  (format "\\(?:%s\\|%s\\(?3:\t\\| [ \t]\\)\\)"
+          ledger-account-directive-regex
+          ledger-account-any-status-no-trailing-spaces-regex))
 
 (defconst ledger-account-pending-regex
-  "\\(^[ \t]+\\)\\(!\\s-*.*?\\)\\(  \\|\t\\|$\\)")
+  "\\(^[ \t]+\\)\\(!\\s-*[^ ].*?\\)\\(  \\|\t\\|$\\)")
 
 (defconst ledger-account-cleared-regex
-  "\\(^[ \t]+\\)\\(*\\s-*.*?\\)\\(  \\|\t\\|$\\)")
+  "\\(^[ \t]+\\)\\(*\\s-*[^ ].*?\\)\\(  \\|\t\\|$\\)")
 
 
 (defmacro ledger-define-regexp (name regex docs &rest args)
@@ -92,7 +100,8 @@
           (list
            `(defconst
               ,(intern (concat "ledger-" (symbol-name name) "-regexp"))
-              ,(eval regex))))
+              ,(eval regex)
+              ,docs)))
         (addend 0) last-group)
     (if (null args)
         (progn
@@ -126,21 +135,21 @@
         (let (var grouping target)
           (if (symbolp arg)
               (setq var arg target arg)
-            (assert (listp arg))
+            (cl-assert (listp arg))
             (if (= 2 (length arg))
                 (setq var (car arg)
                       target (cadr arg))
               (setq var (car arg)
                     grouping (cadr arg)
-                    target (caddr arg))))
+                    target (cl-caddr arg))))
 
           (if (and last-group
                    (not (eq last-group (or grouping target))))
-              (incf addend
-                    (symbol-value
-                     (intern-soft (concat "ledger-regex-"
-                                          (symbol-name last-group)
-                                          "-group--count")))))
+              (cl-incf addend
+                       (symbol-value
+                        (intern-soft (concat "ledger-regex-"
+                                             (symbol-name last-group)
+                                             "-group--count")))))
           (nconc
            defs
            (list
@@ -184,8 +193,8 @@
 (ledger-define-regexp iso-date
                       ( let ((sep '(or ?-  ?/)))
                         (rx (group
-                             (and (? (and (group (= 4 num)))
-                                     (eval sep))
+                             (and (group (= 4 num))
+                                  (eval sep)
                                   (group (and num (? num)))
                                   (eval sep)
                                   (group (and num (? num)))))))
@@ -277,33 +286,41 @@
                       (kind account-kind)
                       (name account))
 
+(ledger-define-regexp commodity-no-group
+                      (rx (or (and ?\" (+ (not (any ?\"))) ?\")
+                              (+ (not (any blank ?\n
+                                           digit
+                                           ?- ?\[ ?\]
+                                           ?. ?, ?\; ?+ ?* ?/ ?^ ?? ?: ?& ?| ?! ?=
+                                           ?\< ?\> ?\{ ?\} ?\( ?\) ?@)))))
+                      "")
+
 (ledger-define-regexp commodity
-                      (rx (group
-                           (or (and ?\" (+ (not (any ?\"))) ?\")
-                               (not (any blank ?\n
-                                         digit
-                                         ?- ?\[ ?\]
-                                         ?. ?, ?\; ?+ ?* ?/ ?^ ?? ?: ?& ?| ?! ?=
-                                         ?\< ?\> ?\{ ?\} ?\( ?\) ?@)))))
+                      (macroexpand
+                       `(rx (group (regexp ,ledger-commodity-no-group-regexp))))
+                      "")
+
+(ledger-define-regexp amount-no-group
+                      (rx (and (? ?-)
+                               (and (+ digit)
+                                    (*? (and (any ?. ?,) (+ digit))))
+                               (? (and (any ?. ?,) (+ digit)))))
                       "")
 
 (ledger-define-regexp amount
-                      (rx (group
-                           (and (? ?-)
-                                (and (+ digit)
-                                     (*? (and (any ?. ?,) (+ digit))))
-                                (? (and (any ?. ?,) (+ digit))))))
+                      (macroexpand
+                       `(rx (group (regexp ,ledger-amount-no-group-regexp))))
                       "")
 
 (ledger-define-regexp commoditized-amount
                       (macroexpand
                        `(rx (group
-                             (or (and (regexp ,ledger-commodity-regexp)
+                             (or (and (regexp ,ledger-commodity-no-group-regexp)
                                       (*? blank)
-                                      (regexp ,ledger-amount-regexp))
-                                 (and (regexp ,ledger-amount-regexp)
+                                      (regexp ,ledger-amount-no-group-regexp))
+                                 (and (regexp ,ledger-amount-no-group-regexp)
                                       (*? blank)
-                                      (regexp ,ledger-commodity-regexp))))))
+                                      (regexp ,ledger-commodity-no-group-regexp))))))
                       "")
 
 (ledger-define-regexp commodity-annotations
@@ -354,24 +371,28 @@
           "\\([[:word:] ]+\\)"   ;; desc
           "\\)"))
 
+(defconst ledger-incomplete-date-regexp
+  "\\(?:\\([0-9]\\{1,2\\}\\)[-/]\\)?\\([0-9]\\{1,2\\}\\)")
+
 (defconst ledger-xact-start-regex
   (concat "^" ledger-iso-date-regexp  ;; subexp 1
           "\\(=" ledger-iso-date-regexp "\\)?"
           ))
 
 (defconst ledger-xact-after-date-regex
-  (concat "\\([ \t]+[*!]\\)?"  ;; mark, subexp 1
-          "\\([ \t]+(.*?)\\)?"  ;; code, subexp 2
-          "\\([ \t]+[^;\n]+\\)"   ;; desc, subexp 3
-          "\\(;[^\n]*\\)?" ;; comment, subexp 4
+  (concat "\\(?:[ \t]+\\([*!]\\)\\)?"  ;; mark, subexp 1
+          "\\(?:[ \t]+\\((.*?)\\)\\)?"  ;; code, subexp 2
+          "\\(?:[ \t]+\\(.+?\\)\\)?"   ;; desc, subexp 3
+          "\\(?:\\(?:\t\\|[ \t]\\{2,\\}\\)\\(;[^\n]*\\)\\)?$" ;; comment, subexp 4
           ))
 
 (defconst ledger-posting-regex
-  (concat "^[ \t]+ ?"  ;; initial white space
-          "\\([*!]\\)? ?" ;; state, subexpr 1
-          "\\([[:print:]]+\\([ \t][ \t]\\)\\)"  ;; account, subexpr 2
-          "\\([^;\n]*\\)"  ;; amount, subexpr 4
-          "\\(.*\\)" ;; comment, subexpr 5
+  (concat "^[[:blank:]]+"                 ; initial white space
+          "\\(\\([*!]\\)?"                ; state and account 1, state 2
+          "[[:blank:]]*\\(.*?\\)\\)?"     ; account 3
+          "\\(?:\t\\|[[:blank:]]\\{2,\\}" ; column separator
+          "\\([^;\n]*?\\)"                ; amount 4
+          "[[:blank:]]*\\(;.*\\)?\\)?$"   ; comment 5
           ))
 
 

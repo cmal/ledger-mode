@@ -1,4 +1,4 @@
-;;; ledger-xact.el --- Helper code for use with the "ledger" command-line tool
+;;; ledger-xact.el --- Helper code for use with the "ledger" command-line tool  -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2003-2016 John Wiegley (johnw AT gnu DOT org)
 
@@ -28,13 +28,9 @@
 (require 'eshell)
 (require 'ledger-regex)
 (require 'ledger-navigate)
-
-(defvar ledger-year)
-(defvar ledger-month)
-(declare-function ledger-read-date "ledger-mode" (prompt))
-(declare-function ledger-next-amount "ledger-post" (&optional end))
-(declare-function ledger-exec-ledger "ledger-exec" (input-buffer &optional output-buffer &rest args))
-(declare-function ledger-post-align-postings "ledger-post" (&optional beg end))
+(require 'ledger-exec)
+(require 'ledger-post)
+(declare-function ledger-read-date "ledger-mode")
 
 ;; TODO: This file depends on code in ledger-mode.el, which depends on this.
 
@@ -43,14 +39,7 @@
   :type 'boolean
   :group 'ledger)
 
-(defcustom ledger-use-iso-dates nil
-  "If non-nil, use the iso-8601 format for dates (YYYY-MM-DD)."
-  :type 'boolean
-  :group 'ledger
-  :safe t)
-
-(defvar ledger-xact-highlight-overlay (list))
-(make-variable-buffer-local 'ledger-xact-highlight-overlay)
+(defvar-local ledger-xact-highlight-overlay (list))
 
 (defun ledger-highlight-make-overlay ()
   (let ((ovl (make-overlay 1 1)))
@@ -67,8 +56,9 @@
       (let ((b (car exts))
             (e (cadr exts))
             (p (point)))
-        (if (and (> (- e b) 1)       ; not an empty line
-                 (<= p e) (>= p b))  ; point is within the boundaries
+        (if (and (> (- e b) 1)            ; not an empty line
+                 (<= p e) (>= p b)        ; point is within the boundaries
+                 (not (region-active-p))) ; no active region
             (move-overlay ledger-xact-highlight-overlay b (+ 1 e))
           (move-overlay ledger-xact-highlight-overlay 1 1))))))
 
@@ -84,6 +74,7 @@
 
 (defun ledger-time-less-p (t1 t2)
   "Say whether time value T1 is less than time value T2."
+  ;; TODO: assert listp, or support when both are strings
   (or (< (car t1) (car t2))
       (and (= (car t1) (car t2))
            (< (nth 1 t1) (nth 1 t2)))))
@@ -95,7 +86,7 @@ MOMENT is an encoded date"
     (catch 'found
       (ledger-xact-iterate-transactions
        (function
-        (lambda (start date mark desc)
+        (lambda (start date _mark _desc)
           (setq last-xact-start start)
           (if (ledger-time-less-p moment date)
               (throw 'found t))))))
@@ -120,7 +111,6 @@ MOMENT is an encoded date"
                   (month (string-to-number (match-string 5)))
                   (day (string-to-number (match-string 6)))
                   (mark (match-string 7))
-                  (code (match-string 8))
                   (desc (match-string 9)))
               (if (and year (> (length year) 0))
                   (setq year (string-to-number year)))
@@ -130,28 +120,21 @@ MOMENT is an encoded date"
                        mark desc)))))
       (forward-line))))
 
-(defun ledger-year-and-month ()
-	"Return the current year and month, separated by / (or -, depending on LEDGER-USE-ISO-DATES)."
-  (let ((sep (if ledger-use-iso-dates
-                 "-"
-               "/")))
-    (concat ledger-year sep ledger-month sep)))
+(defvar ledger-copy-transaction-insert-blank-line-after nil
+  "Non-nil means insert blank line after a transaction inserted with ‘ledger-copy-transaction-at-point’.")
 
 (defun ledger-copy-transaction-at-point (date)
   "Ask for a new DATE and copy the transaction under point to that date.  Leave point on the first amount."
   (interactive  (list
                  (ledger-read-date "Copy to date: ")))
-  (let* ((here (point))
-         (extents (ledger-navigate-find-xact-extents (point)))
+  (let* ((extents (ledger-navigate-find-xact-extents (point)))
          (transaction (buffer-substring-no-properties (car extents) (cadr extents)))
-         encoded-date)
-    (if (string-match ledger-iso-date-regexp date)
-        (setq encoded-date
-              (encode-time 0 0 0 (string-to-number (match-string 4 date))
-                           (string-to-number (match-string 3 date))
-                           (string-to-number (match-string 2 date)))))
+         (encoded-date (ledger-parse-iso-date date)))
     (ledger-xact-find-slot encoded-date)
-    (insert transaction "\n")
+    (insert transaction
+            (if ledger-copy-transaction-insert-blank-line-after
+                "\n\n"
+              "\n"))
     (beginning-of-line -1)
     (ledger-navigate-beginning-of-xact)
     (re-search-forward ledger-iso-date-regexp)
@@ -166,43 +149,58 @@ MOMENT is an encoded date"
   (let ((bounds (ledger-navigate-find-xact-extents pos)))
     (delete-region (car bounds) (cadr bounds))))
 
+(defvar ledger-add-transaction-last-date nil
+  "Last date entered using `ledger-read-transaction'.")
+
+(defun ledger-read-transaction ()
+  "Read the text of a transaction, which is at least the current date."
+  (let ((reference-date (or ledger-add-transaction-last-date (current-time))))
+    (read-string
+     "Transaction: "
+     ;; Pre-fill year and month, but not day: this assumes DD is the last format arg.
+     (ledger-format-date reference-date)
+     'ledger-minibuffer-history)))
+
+(defun ledger-parse-iso-date (date)
+  "Try to parse DATE using `ledger-iso-date-regexp' and return a time value or nil."
+  (save-match-data
+    (when (string-match ledger-iso-date-regexp date)
+      (encode-time 0 0 0 (string-to-number (match-string 4 date))
+                   (string-to-number (match-string 3 date))
+                   (string-to-number (match-string 2 date))))))
+
 (defun ledger-add-transaction (transaction-text &optional insert-at-point)
   "Use ledger xact TRANSACTION-TEXT to add a transaction to the buffer.
 If INSERT-AT-POINT is non-nil insert the transaction there,
 otherwise call `ledger-xact-find-slot' to insert it at the
 correct chronological place in the buffer."
-  (interactive (list
-                ;; Note: This isn't "just" the date - it can contain
-                ;; other text too
-                (ledger-read-date "Transaction: ")))
+  (interactive (list (ledger-read-transaction)))
   (let* ((args (with-temp-buffer
                  (insert transaction-text)
                  (eshell-parse-arguments (point-min) (point-max))))
          (ledger-buf (current-buffer))
-         exit-code)
+         (separator "\n"))
     (unless insert-at-point
-      (let ((date (car args)))
-        (if (string-match ledger-iso-date-regexp date)
-            (setq date
-                  (encode-time 0 0 0 (string-to-number (match-string 4 date))
-                               (string-to-number (match-string 3 date))
-                               (string-to-number (match-string 2 date)))))
-        (ledger-xact-find-slot date)))
+      (let* ((date (car args))
+             (parsed-date (ledger-parse-iso-date date)))
+        (setq ledger-add-transaction-last-date parsed-date)
+        (push-mark)
+        ;; TODO: what about when it can't be parsed?
+        (ledger-xact-find-slot (or parsed-date date))
+        (when (looking-at "\n*\\'")
+          (setq separator ""))))
     (if (> (length args) 1)
         (save-excursion
           (insert
            (with-temp-buffer
-             (setq exit-code
-                   (apply #'ledger-exec-ledger ledger-buf (current-buffer) "xact"
-                          (mapcar 'eval args)))
+             (apply #'ledger-exec-ledger ledger-buf (current-buffer) "xact"
+                    (mapcar 'eval args))
              (goto-char (point-min))
-             (if (looking-at "Error: ")
-                 (error (concat "Error in ledger-add-transaction: " (buffer-string)))
-               (ledger-post-align-postings (point-min) (point-max))
-               (buffer-string)))
-           "\n"))
+             (ledger-post-align-postings (point-min) (point-max))
+             (buffer-string))
+           separator))
       (progn
-        (insert (car args) " \n\n")
+        (insert (car args) " \n" separator)
         (end-of-line -1)))))
 
 (provide 'ledger-xact)

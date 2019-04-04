@@ -13,7 +13,7 @@ CHECKDOC_BATCH_EL := ../tools/checkdoc-batch.el
 all: compile test
 
 %.elc: %.el
-	$(EMACS_BATCH) --eval "(progn (setq byte-compile-error-on-warn t) (batch-byte-compile))" $<
+	$(EMACS_BATCH) --eval "(progn (setq byte-compile-error-on-warn (>= emacs-major-version 25)) (batch-byte-compile))" $<
 
 .PHONY: test
 test: test-interactive test-batch
@@ -38,7 +38,7 @@ distclean: clean
 	rm -f $(CHECKDOC_BATCH_EL)
 
 $(CHECKDOC_BATCH_EL):
-	wget --no-verbose ftp://download.tuxfamily.org/user42/checkdoc-batch.el --output-document=$(CHECKDOC_BATCH_EL)
+	wget --no-verbose https://download.tuxfamily.org/user42/checkdoc-batch.el --output-document=$(CHECKDOC_BATCH_EL)
 
 .PHONY: checkdoc
 checkdoc: $(CHECKDOC_BATCH_EL)

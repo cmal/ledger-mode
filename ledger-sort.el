@@ -1,4 +1,4 @@
-;;; ledger-xact.el --- Helper code for use with the "ledger" command-line tool
+;;; ledger-sort.el --- Helper code for use with the "ledger" command-line tool  -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2003-2016 John Wiegley (johnw AT gnu DOT org)
 
@@ -25,37 +25,36 @@
 ;;
 
 ;;; Code:
-(defvar ledger-payee-any-status-regex)
-(declare-function ledger-navigate-find-xact-extents "ledger-navigate" (pos))
-(declare-function ledger-navigate-next-xact "ledger-navigate" nil)
+(require 'ledger-regex)
+(require 'ledger-navigate)
 
 (defun ledger-sort-find-start ()
-	"Find the beginning of a sort region."
-  (if (re-search-forward ";.*Ledger-mode:.*Start sort" nil t)
-      (match-end 0)))
+  "Find the beginning of a sort region."
+  (when (re-search-forward ";.*Ledger-mode:.*Start sort" nil t)
+    (match-end 0)))
 
 (defun ledger-sort-find-end ()
-	"Find the end of a sort region."
-  (if (re-search-forward ";.*Ledger-mode:.*End sort" nil t)
-      (match-end 0)))
+  "Find the end of a sort region."
+  (when (re-search-forward ";.*Ledger-mode:.*End sort" nil t)
+    (match-end 0)))
 
 (defun ledger-sort-insert-start-mark ()
-	"Insert a marker to start a sort region."
+  "Insert a marker to start a sort region."
   (interactive)
   (save-excursion
     (goto-char (point-min))
-    (if (ledger-sort-find-start)
-        (delete-region (match-beginning 0) (match-end 0))))
+    (when (ledger-sort-find-start)
+      (delete-region (match-beginning 0) (match-end 0))))
   (beginning-of-line)
   (insert "\n; Ledger-mode: Start sort\n\n"))
 
 (defun ledger-sort-insert-end-mark ()
-	"Insert a marker to end a sort region."
+  "Insert a marker to end a sort region."
   (interactive)
   (save-excursion
     (goto-char (point-min))
-    (if (ledger-sort-find-end)
-        (delete-region (match-beginning 0) (match-end 0))))
+    (when (ledger-sort-find-end)
+      (delete-region (match-beginning 0) (match-end 0))))
   (beginning-of-line)
   (insert "\n; Ledger-mode: End sort\n\n"))
 
@@ -67,20 +66,18 @@
   "Sort the region from BEG to END in chronological order."
   (interactive "r") ;; load beg and end from point and mark
   ;; automagically
-  (let ((new-beg beg)
-        (new-end end)
-        point-delta
-        (bounds (ledger-navigate-find-xact-extents (point)))
-        target-xact)
-
-    (setq point-delta (- (point) (car bounds)))
-    (setq target-xact (buffer-substring (car bounds) (cadr bounds)))
-    (setq inhibit-modification-hooks t)
+  (let* ((new-beg beg)
+         (new-end end)
+         (bounds (ledger-navigate-find-xact-extents (point)))
+         (point-delta (- (point) (car bounds)))
+         (target-xact (buffer-substring (car bounds) (cadr bounds)))
+         (inhibit-modification-hooks t))
     (save-excursion
       (save-restriction
         (goto-char beg)
+        ;; make sure beg of region is at the beginning of a line
+        (beginning-of-line)
         ;; make sure point is at the beginning of a xact
-        (ledger-navigate-next-xact)
         (unless (looking-at ledger-payee-any-status-regex)
           (ledger-navigate-next-xact))
         (setq new-beg (point))
@@ -101,8 +98,7 @@
 
     (goto-char (point-min))
     (re-search-forward (regexp-quote target-xact))
-    (goto-char (+ (match-beginning 0) point-delta))
-    (setq inhibit-modification-hooks nil)))
+    (goto-char (+ (match-beginning 0) point-delta))))
 
 (defun ledger-sort-buffer ()
   "Sort the entire buffer."
@@ -113,12 +109,8 @@
       (goto-char (point-min))
       (setq sort-start (ledger-sort-find-start)
             sort-end (ledger-sort-find-end)))
-    (ledger-sort-region (if sort-start
-                            sort-start
-                          (point-min))
-                        (if sort-end
-                            sort-end
-                          (point-max)))))
+    (ledger-sort-region (or sort-start (point-min))
+                        (or sort-end (point-max)))))
 
 (provide 'ledger-sort)
 

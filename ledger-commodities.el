@@ -1,4 +1,4 @@
-;;; ledger-commodities.el --- Helper code for use with the "ledger" command-line tool
+;;; ledger-commodities.el --- Helper code for use with the "ledger" command-line tool  -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2003-2016 John Wiegley (johnw AT gnu DOT org)
 
@@ -81,9 +81,9 @@ Returns a list with (value commodity)."
            ((re-search-forward "0" nil t)
             ;; couldn't find a decimal number, look for a single 0,
             ;; indicating account with zero balance
-            (list 0 ledger-reconcile-default-commodity))))
-      ;; nothing found, return 0
-      (list 0 ledger-reconcile-default-commodity))))
+            (list 0 ledger-reconcile-default-commodity))
+           ;; nothing found, return 0
+           (t (list 0 ledger-reconcile-default-commodity)))))))
 
 (defun ledger-string-balance-to-commoditized-amount (str)
   "Return a commoditized amount (val, 'comm') from STR."
@@ -92,13 +92,13 @@ Returns a list with (value commodity)."
               (ledger-split-commodity-string st))
           (split-string str "[\n\r]")))
 
-(defun -commodity (c1 c2)
+(defun ledger-subtract-commodity (c1 c2)
   "Subtract C2 from C1, ensuring their commodities match."
   (if (string= (cadr c1) (cadr c2))
       (list (-(car c1) (car c2)) (cadr c1))
     (error "Can't subtract different commodities %S from %S" c2 c1)))
 
-(defun +commodity (c1 c2)
+(defun ledger-add-commodity (c1 c2)
   "Add C1 and C2, ensuring their commodities match."
   (if (string= (cadr c1) (cadr c2))
       (list (+ (car c1) (car c2)) (cadr c1))
@@ -112,7 +112,7 @@ Returns a list with (value commodity)."
   "improve builtin string-to-number by handling internationalization, and return nil if number can't be parsed"
   (let ((nstr (if (or decimal-comma
                       (assoc "decimal-comma" ledger-environment-alist))
-                  (ledger-strip str ".")
+                  (ledger-strip str "[.]")
                 (ledger-strip str ","))))
     (while (string-match "," nstr)  ;if there is a comma now, it is a thousands separator
       (setq nstr (replace-match "." nil nil nstr)))

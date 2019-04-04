@@ -1,4 +1,4 @@
-;;; ledger-occur.el --- Helper code for use with the "ledger" command-line tool
+;;; ledger-occur.el --- Helper code for use with the "ledger" command-line tool  -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2003-2016 John Wiegley (johnw AT gnu DOT org)
 
@@ -29,9 +29,7 @@
 
 ;;; Code:
 
-;; TODO: replace this with (require 'cl-lib)
-(with-no-warnings
-	(require 'cl))
+(require 'cl-lib)
 (require 'ledger-navigate)
 
 (defconst ledger-occur-overlay-property-name 'ledger-occur-custom-buffer-grep)
@@ -62,8 +60,8 @@
     (ledger-occur-remove-overlays)
     (message "Showing all transactions")))
 
-(define-key ledger-occur-mode-map (kbd "C-c C-g") 'ledger-occur-refresh)
-(define-key ledger-occur-mode-map (kbd "C-c C-f") 'ledger-occur-mode)
+(define-key ledger-occur-mode-map (kbd "C-c C-g") #'ledger-occur-refresh)
+(define-key ledger-occur-mode-map (kbd "C-c C-f") #'ledger-occur-mode)
 
 (defun ledger-occur-refresh ()
   "Re-apply the current narrowing expression."
@@ -108,7 +106,8 @@ currently active."
 (defun ledger-occur-make-visible-overlay (beg end)
   (let ((ovl (make-overlay beg end (current-buffer))))
     (overlay-put ovl ledger-occur-overlay-property-name t)
-    (overlay-put ovl 'font-lock-face 'ledger-occur-xact-face)))
+    (when ledger-occur-use-face-shown
+      (overlay-put ovl 'font-lock-face 'ledger-occur-xact-face))))
 
 (defun ledger-occur-make-invisible-overlay (beg end)
   (let ((ovl (make-overlay beg end (current-buffer))))
@@ -119,7 +118,7 @@ currently active."
   "Create the overlays for the visible transactions.
 Argument OVL-BOUNDS contains bounds for the transactions to be left visible."
   (let* ((beg (caar ovl-bounds))
-         (end (cadar ovl-bounds)))
+         (end (cl-cadar ovl-bounds)))
     (ledger-occur-remove-overlays)
     (ledger-occur-make-invisible-overlay (point-min) (1- beg))
     (dolist (visible (cdr ovl-bounds))
@@ -156,7 +155,7 @@ Argument OVL-BOUNDS contains bounds for the transactions to be left visible."
   (if buffer-matches
       (let ((points (list))
             (current-beginning (caar buffer-matches))
-            (current-end (cadar buffer-matches)))
+            (current-end (cl-cadar buffer-matches)))
         (dolist (match (cdr buffer-matches))
           (if (< (- (car match) current-end) 2)
               (setq current-end (cadr match))
